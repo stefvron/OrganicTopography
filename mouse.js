@@ -1,17 +1,17 @@
-const DEBUG = true;
+const DEBUG = false;
 
 let fps = 60;
 let speed = 10;
-let dragIntensity = 0.3;
-let dragRadius = 250;
-let depth = 300;
+let dragIntensity = 0.7;
+let dragRadius = 150;
+let depth = 150;
 let colour = "255, 155, 249";
 let borderColour = "20, 0, 15";
-let resolution = 2**7;
+let resolution = 2**6;
 let slowDown = 0.5;
-let stepCount = 10;
-let conProxFact = 1;
+let stepCount = 8;
 let borderThickness = 2;
+let roundingPasses = 2;
 
 window.wallpaperPropertyListener = {
     applyUserProperties: function(props) {
@@ -138,6 +138,10 @@ function renderFrame() {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     calcSteps();
+    stepVertices.forEach(g => {
+        g.calculateEdges();
+        g.roundEdgesNtimes(roundingPasses);
+    });
     drawBorders();
 
     if(DEBUG) {
@@ -154,11 +158,15 @@ class StepGraph {
     }
     get getAllVertices() { return this.vertices; }
     get getAllEdges() { return this.edges; }
-    getVertices(x, y) {
-        return this.vertices.filter(obj => obj.getBX == x && obj.getBY == y);
+    getVertices(x, y, tolerance) {
+        if(tolerance == undefined) tolerance = 0.1;
+        return this.vertices.filter(obj => {
+            return Math.abs(obj.getBX - x) < tolerance && 
+                Math.abs(obj.getBY - y) < tolerance
+        });
     }
     getVertex(x, y, orientation) {
-        return this.getVertices(x, y).find(obj => obj.getOrientation == orientation);
+        return this.getVertices(x, y).find(obj => obj.getOrientation() == orientation);
     }
     addVertex(bX, bY, x, y) {
         if(
@@ -183,6 +191,9 @@ class StepGraph {
     getNeighbours(v) {
         return this.edges.filter(e => e.hasV(v));
     }
+    getDirectedNeighbours(v) {
+        return this.edges.filter(e => e.getV1 == v);
+    }
     
     clear() {
         this.edges = [];
@@ -190,37 +201,98 @@ class StepGraph {
     }
 
     calculateEdges() {
+        this.edges = [];
         const order = [
-            -1,     // Bottom Left
-            0,      // Left
-            1       // Top Left
+            [0, 0,-1],     // Bottom Left
+            [0,-1, 0],      // Left
+            [1,-1, 1]       // Top Left
         ];
         this.vertices.forEach(v => {
-            let off = [0,0];
+            let dir = [0,0];
+            let side = [0,0];
             switch(v.getOrientation()) {
                 case Orientation.NORTH:
-                    off = [-1, 0];
+                    dir = [0, -1];
+                    side = [1, 0];
                     break;
                 case Orientation.EAST:
-                    off = [0, -1];
+                    dir = [1, 0];
+                    side = [0, 1];
                     break;
                 case Orientation.SOUTH:
-                    off = [1, 0];
+                    dir = [0, 1];
+                    side = [-1, 0];
                     break;
                 case Orientation.WEST:
-                    off = [0, 1];
+                    dir = [-1, 0];
+                    side = [0, -1];
             }
             let found = false;
             order.forEach(o => {
                 if(found) return;
+                let newOri = (v.getOrientation() + o[2]) % 4
+                while(newOri < 0) newOri += 4;
+                let x = o[0]*dir[0] + o[1]*side[0];
+                let y = o[0]*dir[1] + o[1]*side[1];
+                x = x * resolution + v.getBX;
+                y = y * resolution + v.getBY;
                 const v2 = this.getVertex(
-                    v.getBX + off[0] + o*off[1],
-                    v.getBY + off[1] + o*off[0],
-                    (v.getOrientation() + o) % 4
+                    x,
+                    y,
+                    newOri
                 );
-                console.log(v2)
+                if(v2 != undefined) {
+                    found = true;
+                    this.addEdge(v, v2);
+                }
             });
         });
+    }
+    roundEdgesNtimes(n) {
+        for(let i = 0; i < n; i++) {
+            this.roundEdges();
+        }
+    }
+    roundEdges() {
+        // Chaikin corner cutting
+        let newVertices = [];
+        let newEdges = [];
+
+        let replacedBy = new Map();
+
+        this.vertices.forEach(v => {
+            let neighbours = this.getDirectedNeighbours(v);
+            neighbours.forEach(e => {
+                let v2 = e.getV2;
+                let q = new StepGraphVertex(
+                    null,
+                    null,
+                    0.75*v.getX + 0.25*v2.getX,
+                    0.75*v.getY + 0.25*v2.getY
+                );
+                let r = new StepGraphVertex(
+                    null,
+                    null,
+                    0.25*v.getX + 0.75*v2.getX,
+                    0.25*v.getY + 0.75*v2.getY
+                );
+                newVertices.push(q);
+                newVertices.push(r);
+                newEdges.push(new StepGraphEdge(q, r));
+                if(!replacedBy.has(v)) replacedBy.set(v, []);
+                if(!replacedBy.has(v2)) replacedBy.set(v2, []);
+                replacedBy.get(v).push(q);
+                replacedBy.get(v2).push(r);
+            });
+        });
+        this.vertices.forEach(v => {
+            let arr = replacedBy.get(v);
+            if(arr instanceof Array && arr.length == 2) {
+                newEdges.push(new StepGraphEdge(arr[0], arr[1]));
+            }
+        });
+        this.vertices = newVertices;
+        this.edges = newEdges;
     }
 }
 const Orientation = Object.freeze({
@@ -240,6 +312,8 @@ class StepGraphVertex {
     get getBY() { return this.bY; }
     get getX() { return this.x; }
     get getY() { return this.y; }
+    setX(x) { this.x = x; }
+    setY(y) { this.y = y; }
 
     getOrientation() {
         if(this.bX > this.x) return Orientation.WEST;
@@ -256,6 +330,8 @@ class StepGraphEdge {
     get getV1() { return this.v1; }
     get getV2() { return this.v2; }
     hasV(v) { return this.v1 == v || this.v2 == v; }
+    setV1(v) { this.v1 = v; }
+    setV2(v) { this.v2 = v; }
 }
 function calcSteps() {
     for(let i = 0; i < stepCount; i++) {
@@ -269,21 +345,29 @@ function calcSteps() {
             let a = probes[i][j];
             if(i+1 < nX) {
                 let b = probes[i+1][j];
-                appendSteps(calcStepsAB(a,b));
+                appendSteps(a, b);
             }
             if(j+1 < nY) {
                 let b = probes[i][j+1];
-                appendSteps(calcStepsAB(a,b));
+                appendSteps(a, b);
             }
         }
     }
 
-    function appendSteps(vertices) {
+    function appendSteps(a, b) {
+        // Switch so that b always has a higher Z value than a
+        if(a[2] > b[2]) {
+            let c = a;
+            a = b;
+            b = c;
+        }
+        let vertices = calcStepsAB(a, b);
+
         vertices.forEach(v => {
             const layer = stepVertices[steps.indexOf(v[2])];
-            layer.addVertex(
-                v[3],   // bX
-                v[4],   // bY
+            const newV = layer.addVertex(
+                a[0],     // bX
+                a[1],     // bY
                 v[0],   // x
                 v[1]    //y
             );
@@ -291,13 +375,6 @@ function calcSteps() {
     }
 }
 function calcStepsAB(a, b) {
-    // Switch so that b always has a higher Z value than a
-    if(a[2] > b[2]) {
-        let c = a;
-        a = b;
-        b = c;
-    }
-
     let vertices = [];
 
     for(let i = 0; i < stepCount; i++) {
@@ -308,7 +385,7 @@ function calcStepsAB(a, b) {
         let dP = getDistPerc(steps[i]);
         let bMA = b.map((e, index) => (e-a[index])*dP);
         v = v.map((e, index) => e + bMA[index]);
-        v = [v[0], v[1], steps[i], a[0], a[1]];
+        v = [v[0], v[1], steps[i]];
 
         vertices.push(v);
     }
@@ -319,11 +396,21 @@ function calcStepsAB(a, b) {
     }
 }
 function drawBorders() {
-    stepVertices.forEach(g => g.calculateEdges());
     let edges = [];
-    stepVertices.forEach(g => edges.push(...g.getAllEdges));
+    stepVertices.forEach(g => {
+        edges.push(...g.getAllEdges);
+    });
+    let ctx = renderCanvas.getContext('2d');
+    edges.forEach(e => {
+        ctx.beginPath();
+        ctx.moveTo(e.getV1.getX, e.getV1.getY);
+        ctx.lineTo(e.getV2.getX, e.getV2.getY);
+        ctx.strokeStyle = "rgb(" + borderColour + ")";
+        ctx.lineWidth = borderThickness;
+        ctx.stroke();
+    }); 
+    return;
     stepVertices.forEach(layer => {
-        return;
         let vs = [...(layer.getAllVertices)];
         while(vs.length > 0) {
             let v1 = vs.pop();
@@ -342,7 +429,6 @@ function drawBorders() {
             })
         }
     });
-    let ctx = renderCanvas.getContext('2d');
     edges.forEach(e => {
         ctx.beginPath();
         ctx.moveTo(e[0].getX, e[0].getY);
@@ -386,7 +472,7 @@ async function render() {
 
 
 // DEBUG
-const stepColours = ["#f00","#0f0","#00f"];
+const stepColours = ["#f00","#0f0","#00f", "#ff0", "#0ff", "#f0f"];
 function drawStepVertices() {
     let ctx = renderCanvas.getContext('2d');
     stepVertices.forEach(vs => [...vs.getAllVertices].forEach(v => {
