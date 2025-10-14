@@ -3,7 +3,6 @@ body {
 }
 
 #mouseCanvas {
-    cursor: none;
     position: absolute;
     top: 0;
     left: 0;

@@ -1,17 +1,20 @@
-const DEBUG = false;
+const DEBUG = true;
 
 let fps = 60;
 let speed = 10;
-let dragIntensity = 0.7;
-let dragRadius = 150;
+let dragIntensity = 0.6;
+let dragRadius = 100;
 let depth = 150;
-let colour = "255, 155, 249";
-let borderColour = "20, 0, 15";
-let resolution = 2**6;
+let borderColour = "255, 155, 249";
+let colour = "20, 0, 15";
+let resolution = 40;
 let slowDown = 0.5;
 let stepCount = 8;
 let borderThickness = 2;
-let roundingPasses = 2;
+let roundingPasses = 1;
+let randomness = 0;
+let mountainCount = 100;
+let mountainSize = 250;
 
 window.wallpaperPropertyListener = {
     applyUserProperties: function(props) {
@@ -45,6 +48,8 @@ let canvas = null;
 let renderCanvas = document.createElement("canvas");
 let renderLoop = null;
 
+let mountains = [];
+let mouseMountains = [];
 let probes = [];
 let mousePos = [[innerWidth/2, innerHeight/2, 0]];
 
@@ -60,16 +65,34 @@ function initCanvas() {
     renderCanvas.width = innerWidth;
     renderCanvas.height = innerHeight;
 
+    initMountains();
     initProbes();
     renderLoop = setInterval(render, 1000/fps);
     addEventListener("mousemove", handleMouseMove);
     initSteps();
 }
 
+function initMountains() {
+    mountains = [];
+    for(let i = 0; i < mountainCount; i++) {
+        let m = {
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height,
+            z: Math.random() * depth,
+            vx: Math.random() * 2 - 1,
+            vy: Math.random() * 2 - 1,
+            vz: Math.random() * 2 - 1,
+            reach: mountainSize*0.25 + Math.random()**2 * mountainSize * 0.75
+        }
+        mountains.push(m);
+    }
+}
+
 function initSteps() {
-    steps = [depth];
+    const stepDepth = 0.94 * depth;
+    steps = [0.97 * depth];
     stepVertices = [new StepGraph()];
-    let dist = depth / stepCount;
+    let dist = stepDepth / stepCount;
     for(i = 1; i < stepCount; i++) {
         steps.push(steps[i-1]-dist)
         stepVertices.push(new StepGraph());
@@ -102,6 +125,20 @@ function handleMouseMove(event) {
             if(Math.abs(v[4]) < Math.abs(vz)) v[4] += vz;
         }
     }));
+    let vz = Math.abs(Math.sqrt(
+        event.movementX**2 +
+        event.movementY**2
+    )) * dragIntensity;
+    let m = {
+        x: event.clientX,
+        y: event.clientY,
+        z: Math.min(depth, vz * depth),
+        vx: 0,
+        vy: 0,
+        vz: depth/100*slowDown,
+        reach: dragRadius
+    }
+    mouseMountains.push(m);
 
 }
 function setMouseAt(event, n) {
@@ -121,10 +158,11 @@ function initProbes() {
         }
         probes.push(probeCol);
     }
+    calculateMountains();
 }
 function getRandomProbeAt(x, y) {
-    //       X, Y, Z, VZ, V2Z
-    let v = [0, 0, 0,  0,   0];
+    //       X, Y, Z, VZ, V2Z, MZ
+    let v = [0, 0, 0,  0,   0,  0];
     v[0] = x;
     v[1] = y;
     v[2] = Math.random() * depth;
@@ -137,6 +175,7 @@ function renderFrame() {
     ctx.fillStyle = "rgb(" + colour + ")";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    calculateMountains();
     calcSteps();
     stepVertices.forEach(g => {
         g.calculateEdges();
@@ -145,6 +184,7 @@ function renderFrame() {
     drawBorders();
 
     if(DEBUG) {
+        drawMountains();
         drawProbes();
         drawStepVertices();
     }
@@ -159,10 +199,10 @@ class StepGraph {
     get getAllVertices() { return this.vertices; }
     get getAllEdges() { return this.edges; }
     getVertices(x, y, tolerance) {
-        if(tolerance == undefined) tolerance = 0.1;
+        if(tolerance == undefined) tolerance = 0;
         return this.vertices.filter(obj => {
-            return Math.abs(obj.getBX - x) < tolerance && 
-                Math.abs(obj.getBY - y) < tolerance
+            return Math.abs(obj.getBX - x) <= tolerance && 
+                Math.abs(obj.getBY - y) <= tolerance
         });
     }
     getVertex(x, y, orientation) {
@@ -355,6 +395,11 @@ function calcSteps() {
     }
 
     function appendSteps(a, b) {
+        // Make copies and calculate randomn portion of Z values
+        a = [...a];
+        b = [...b];
+        a[2] = randomness*a[2] + (1-randomness)*a[5];
+        b[2] = randomness*b[2] + (1-randomness)*b[5];
         // Switch so that b always has a higher Z value than a
         if(a[2] > b[2]) {
             let c = a;
@@ -392,7 +437,9 @@ function calcStepsAB(a, b) {
     return vertices;
 
     function getDistPerc(z) {
-        return (z - a[2]) / (b[2] - a[2]);
+        let res = (z - a[2]) / (b[2] - a[2]);
+        if(isNaN(res)) res = 0;
+        return res;
     }
 }
 function drawBorders() {
@@ -409,34 +456,26 @@ function drawBorders() {
         ctx.lineWidth = borderThickness;
         ctx.stroke();
     }); 
-    return;
-    stepVertices.forEach(layer => {
-        let vs = [...(layer.getAllVertices)];
-        while(vs.length > 0) {
-            let v1 = vs.pop();
-            vs.forEach(v2 => {
-                let dist =
-                    Math.abs(Math.sqrt(
-                        (v1.getX - v2.getX)**2 + 
-                        (v1.getY - v2.getY)**2
-                    ));
-                if(dist < conProxFact*resolution) {
-                    let edge = Array(2);
-                    edge[0] = v1;
-                    edge[1] = v2;
-                    edges.push(edge);
-                }
-            })
-        }
-    });
-    edges.forEach(e => {
-        ctx.beginPath();
-        ctx.moveTo(e[0].getX, e[0].getY);
-        ctx.lineTo(e[1].getX, e[1].getY);
-        ctx.strokeStyle = "rgb(" + borderColour + ")";
-        ctx.lineWidth = borderThickness;
-        ctx.stroke();
-    }); 
+}
+
+function calculateMountains() {
+    const ms = [...mountains, ...mouseMountains];
+    probes.forEach(col => col.forEach(v => {
+        v[5] = depth;
+        ms.forEach(m => {
+            let dist = Math.sqrt(
+                (v[0] - m.x)**2 +
+                (v[1] - m.y)**2
+            );
+            if(dist < m.reach) {
+                let propZ = m.z;
+                let heightPerc = 1 - (dist / m.reach);
+                heightPerc = Math.min(1, Math.max(0, heightPerc));
+                v[5] -= heightPerc * propZ;
+                v[5] = Math.max(0, v[5]);
+            }
+        })
+    }));
 }
 
 function stepFrame() {
@@ -450,6 +489,14 @@ function moveProbes() {
         if(Math.abs(v[4]) >= 0.05) v[4] = v[4]*slowDown;
         else v[4] = 0;
     }));
+    const ms = [...mouseMountains, ...mountains];
+    ms.forEach(m => {
+        m.x += m.vx * speed / fps;
+        m.y += m.vy * speed / fps;
+        m.z += m.vz * speed / fps;
+    });
+    mouseMountains.forEach(m => {
+    });
 }
 function handleOutOfBounds() {
     bounceOutOfBounds();
@@ -463,6 +510,15 @@ function bounceOutOfBounds() {
         return;
         v[2] = Math.min(depth, Math.max(0, v[2]));
     }));
+    mountains.forEach(m => {
+        if(m.x < 0 && m.vx < 0) m.vx *= -1;
+        if(m.x > canvas.width && m.vx > 0) m.vx *= -1;
+        if(m.y < 0 && m.vy < 0) m.vy *= -1;
+        if(m.y > canvas.height && m.vy > 0) m.vy *= -1;
+        if(m.z < 0 && m.vz < 0) m.vz *= -1;
+        if(m.z > depth && m.vz > 0) m.vz *= -1;
+    });
+    mouseMountains = mouseMountains.filter(m => m.z <= depth);
 }
 
 async function render() {
@@ -487,9 +543,27 @@ function drawProbes() {
     let ctx = renderCanvas.getContext('2d');
     probes.forEach(col => col.forEach(v => {
         ctx.beginPath();
-        let depthPerc = (1 - (v[2]/depth));
+        const realDepth = randomness*v[2] + (1-randomness)*v[5];
+        let depthPerc = (1 - (realDepth/depth));
         ctx.arc(v[0], v[1], 2, 0, 2*Math.PI);
-        ctx.fillStyle = "rgba(" + borderColour+ ", " + depthPerc + ")";
+        ctx.fillStyle = "rgba(" + "0, 0, 255" + ", " + depthPerc + ")";
         ctx.fill();
     }));
+}
+function drawMountains() {
+    let ctx = renderCanvas.getContext('2d');
+    mountains.forEach(m => {
+        ctx.beginPath();
+        let depthPerc = (1 - (m.z/depth));
+        ctx.arc(m.x, m.y, m.reach, 0, 2*Math.PI);
+        ctx.fillStyle = "rgba(" + "0, 255, 0" + ", " + depthPerc + ")";
+        ctx.fill();
+    });
+    mouseMountains.forEach(m => {
+        ctx.beginPath();
+        let depthPerc = (1 - (m.z/mountainCount/depth));
+        ctx.arc(m.x, m.y, m.reach, 0, 2*Math.PI);
+        ctx.fillStyle = "rgba(" + "255, 0, 0" + ", " + depthPerc + ")";
+        ctx.fill();
+    });
 }
