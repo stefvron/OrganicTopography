@@ -1,6 +1,6 @@
 const DEBUG = true;
 
-let fps = 10;
+let fps = 60;
 let speed = 10;
 let dragIntensity = 0.3;
 let dragRadius = 250;
@@ -153,13 +153,12 @@ class StepGraph {
         this.vertices = [];
     }
     get getAllVertices() { return this.vertices; }
+    get getAllEdges() { return this.edges; }
     getVertices(x, y) {
         return this.vertices.filter(obj => obj.getBX == x && obj.getBY == y);
     }
     getVertex(x, y, orientation) {
-        return getVertices(x, y).find(obj => {
-            obj.getOrientation == orientation
-        });
+        return this.getVertices(x, y).find(obj => obj.getOrientation == orientation);
     }
     addVertex(bX, bY, x, y) {
         if(
@@ -189,6 +188,40 @@ class StepGraph {
         this.edges = [];
         this.vertices = [];
     }
+
+    calculateEdges() {
+        const order = [
+            -1,     // Bottom Left
+            0,      // Left
+            1       // Top Left
+        ];
+        this.vertices.forEach(v => {
+            let off = [0,0];
+            switch(v.getOrientation()) {
+                case Orientation.NORTH:
+                    off = [-1, 0];
+                    break;
+                case Orientation.EAST:
+                    off = [0, -1];
+                    break;
+                case Orientation.SOUTH:
+                    off = [1, 0];
+                    break;
+                case Orientation.WEST:
+                    off = [0, 1];
+            }
+            let found = false;
+            order.forEach(o => {
+                if(found) return;
+                const v2 = this.getVertex(
+                    v.getX + off[0] + o*off[1],
+                    v.getY + off[1] + o*off[0],
+                    (v.getOrientation() + o) % 4
+                );
+                console.log(v2)
+            });
+        });
+    }
 }
 const Orientation = Object.freeze({
     NORTH: 0,
@@ -212,7 +245,7 @@ class StepGraphVertex {
         if(this.bX > this.x) return Orientation.WEST;
         if(this.bX < this.x) return Orientation.EAST;
         if(this.bY > this.y) return Orientation.NORTH;
-        return SOUTH;
+        return Orientation.SOUTH;
     }
 }
 class StepGraphEdge {
@@ -247,7 +280,8 @@ function calcSteps() {
 
     function appendSteps(vertices) {
         vertices.forEach(v => {
-            stepVertices[steps.indexOf(v[2])].addVertex(
+            const layer = stepVertices[steps.indexOf(v[2])];
+            layer.addVertex(
                 v[3],   // bX
                 v[4],   // bY
                 v[0],   // x
@@ -285,8 +319,11 @@ function calcStepsAB(a, b) {
     }
 }
 function drawBorders() {
+    stepVertices.forEach(g => g.calculateEdges());
     let edges = [];
+    stepVertices.forEach(g => edges.push(...g.getAllEdges));
     stepVertices.forEach(layer => {
+        return;
         let vs = [...(layer.getAllVertices)];
         while(vs.length > 0) {
             let v1 = vs.pop();
