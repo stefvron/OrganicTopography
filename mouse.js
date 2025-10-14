@@ -214,8 +214,8 @@ class StepGraph {
             order.forEach(o => {
                 if(found) return;
                 const v2 = this.getVertex(
-                    v.getX + off[0] + o*off[1],
-                    v.getY + off[1] + o*off[0],
+                    v.getBX + off[0] + o*off[1],
+                    v.getBY + off[1] + o*off[0],
                     (v.getOrientation() + o) % 4
                 );
                 console.log(v2)
