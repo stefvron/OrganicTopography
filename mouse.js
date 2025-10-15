@@ -1,7 +1,7 @@
-const DEBUG = true;
+const DEBUG = false;
 
-let fps = 60;
-let speed = 10;
+let fps = 30;
+let speed = 1;
 let dragIntensity = 0.6;
 let dragRadius = 100;
 let depth = 150;
@@ -11,7 +11,7 @@ let resolution = 40;
 let slowDown = 0.5;
 let stepCount = 8;
 let borderThickness = 2;
-let roundingPasses = 1;
+let roundingPasses = 2;
 let randomness = 0;
 let mountainCount = 100;
 let mountainSize = 250;
@@ -461,7 +461,7 @@ function drawBorders() {
 function calculateMountains() {
     const ms = [...mountains, ...mouseMountains];
     probes.forEach(col => col.forEach(v => {
-        v[5] = depth;
+        v[5] = 0;
         ms.forEach(m => {
             let dist = Math.sqrt(
                 (v[0] - m.x)**2 +
@@ -471,8 +471,8 @@ function calculateMountains() {
                 let propZ = m.z;
                 let heightPerc = 1 - (dist / m.reach);
                 heightPerc = Math.min(1, Math.max(0, heightPerc));
-                v[5] -= heightPerc * propZ;
-                v[5] = Math.max(0, v[5]);
+                v[5] += heightPerc * propZ;
+                v[5] = Math.min(depth, v[5]);
             }
         })
     }));
